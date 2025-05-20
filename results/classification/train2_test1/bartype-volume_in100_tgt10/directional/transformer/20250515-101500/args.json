@@ -1,0 +1,23 @@
+{
+    "task_type": "classification",
+    "labeling_strategy": "directional",
+    "bar_type": "volume",
+    "nb_bars": 10000,
+    "model_name": "transformer",
+    "d_model": 512,
+    "nhead": 8,
+    "dim_ff": 512,
+    "hidden_dim": 256,
+    "num_layers": 2,
+    "dropout": 0.1,
+    "output_dim": 2,
+    "epochs": 50,
+    "batch_size": 1024,
+    "lr": 0.0001,
+    "weight_decay": 0.0001,
+    "early_stopping_patience": 30,
+    "num_workers": 4,
+    "seed": 42,
+    "_num_train_days": 2,
+    "_num_test_days": 1
+}

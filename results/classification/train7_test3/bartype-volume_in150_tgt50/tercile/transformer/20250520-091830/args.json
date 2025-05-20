@@ -1,0 +1,23 @@
+{
+    "task_type": "classification",
+    "labeling_strategy": "tercile",
+    "bar_type": "volume",
+    "nb_bars": 10000,
+    "model_name": "transformer",
+    "d_model": 512,
+    "nhead": 8,
+    "dim_ff": 2048,
+    "hidden_dim": 256,
+    "num_layers": 4,
+    "dropout": 0.3,
+    "output_dim": 3,
+    "epochs": 20,
+    "batch_size": 1024,
+    "lr": 0.0001,
+    "weight_decay": 0.001,
+    "early_stopping_patience": 10,
+    "num_workers": 4,
+    "seed": 42,
+    "_num_train_days": 7,
+    "_num_test_days": 3
+}

@@ -1,0 +1,8 @@
+# Project folders
+notebook_archives/
+data/
+processed_data/
+Archives/
+
+# OS specific
+.DS_Store

@@ -1,0 +1,23 @@
+{
+    "task_type": "classification",
+    "labeling_strategy": "tercile",
+    "bar_type": "volume",
+    "nb_bars": 10000,
+    "model_name": "tcn",
+    "d_model": 128,
+    "nhead": 8,
+    "dim_ff": 1024,
+    "hidden_dim": 512,
+    "num_layers": 2,
+    "dropout": 0.5,
+    "output_dim": 3,
+    "epochs": 25,
+    "batch_size": 1024,
+    "lr": 0.001,
+    "weight_decay": 0.01,
+    "early_stopping_patience": 30,
+    "num_workers": 4,
+    "seed": 42,
+    "_num_train_days": 2,
+    "_num_test_days": 1
+}
