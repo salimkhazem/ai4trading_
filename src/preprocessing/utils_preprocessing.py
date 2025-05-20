@@ -36,22 +36,12 @@ def clean_raw_data(df_raw: pd.DataFrame, columns_to_drop_custom: list[str] = Non
         pd.DataFrame: The cleaned DataFrame.
     """
     logging.info("Starting data cleaning...")
-    if df_raw.empty:
-        logging.warning("Input DataFrame for cleaning is empty. Returning as is.")
-        return df_raw
-
+    # --- Drop NaNs ---
     initial_rows = len(df_raw)
-    # It's safer to work on a copy if df_raw might be used elsewhere,
-    # though dropna itself can return a copy or modify inplace.
     df_clean = df_raw.dropna().copy() 
-    
     rows_dropped_nan = initial_rows - len(df_clean)
     percent_dropped_nan = (rows_dropped_nan / initial_rows * 100) if initial_rows > 0 else 0.0
     logging.info(f"Dropped {rows_dropped_nan:,} rows with NaNs ({percent_dropped_nan:.2f}%). Shape after NaN drop: {df_clean.shape}")
-
-    if df_clean.empty:
-        logging.warning("DataFrame became empty after dropping NaNs.")
-        return df_clean
 
     if columns_to_drop_custom is None:
         columns_to_drop = [

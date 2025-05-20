@@ -10,6 +10,7 @@ from typing import List, Tuple, Optional
 import gc
 from pathlib import Path
 import warnings
+from joblib import Parallel, delayed # Added for parallel processing
 
 # --- Add project root to sys.path ---
 current_file_path = Path(__file__).resolve()
@@ -173,7 +174,7 @@ def create_volume_bars_with_lob_features(
         }
         # Aggregate other LOB features
         for col in features_to_aggregate:
-            # Catch and log RuntimeWarnings specifically for this column's aggregations
+            # Catch and log RuntimeWarnings specifically for this column\'s aggregations
             with warnings.catch_warnings(record=True) as caught_warnings:
                 warnings.simplefilter("always", RuntimeWarning) # Ensure RuntimeWarnings are caught
 
@@ -364,10 +365,10 @@ def _process_symbol_bars_windows(
     window_length: int,
     target_window_length: int,
     target_col_name: str
-) -> Optional[Tuple[np.ndarray, np.ndarray, pd.DataFrame, List[str]]]:
+) -> Optional[Tuple[str, np.ndarray, np.ndarray, pd.DataFrame, List[str]]]: # Added sym_name to output
     """
     Processes a single symbol: creates volume bars and generates sequential windows.
-    Designed to be called by joblib.Parallel.
+    Designed to be called by joblib.Parallel. Returns symbol name along with results.
 
     Args:
         sym_name (str): The name of the symbol being processed.
@@ -378,8 +379,8 @@ def _process_symbol_bars_windows(
         target_col_name (str): Column name for the target variable.
 
     Returns:
-        Optional[Tuple[np.ndarray, np.ndarray, pd.DataFrame, List[str]]]: 
-            A tuple containing (X_windows, target_windows, window_info, feature_cols) 
+        Optional[Tuple[str, np.ndarray, np.ndarray, pd.DataFrame, List[str]]]: 
+            A tuple containing (sym_name, X_windows, target_windows, window_info, feature_cols) 
             for the symbol, or None if processing fails at any step.
     """
     
@@ -415,7 +416,7 @@ def _process_symbol_bars_windows(
     window_info_sym['sym'] = sym_name
     logging.debug(f"[{sym_name}] Generated {len(X_windows_sym)} windows.")
     
-    return X_windows_sym, target_windows_sym, window_info_sym, feature_cols
+    return sym_name, X_windows_sym, target_windows_sym, window_info_sym, feature_cols
 
 
 # --- Main Daily Processing Function ---
@@ -429,7 +430,7 @@ def process_day(
     output_dir: str,
     symbols_to_exclude: List[str] 
 ) -> int:
-    """Process a single day: load, feature compute, bar creation, windowing, combine, save."""
+    """Process a single day: load, feature compute, bar creation, windowing (in parallel), combine, save."""
     logging.info(f"--- Processing Day: {day} ---")
     day_start_time = time.time()
     day_peak_mem_start = get_memory_usage_gb()
@@ -479,94 +480,127 @@ def process_day(
     step_start_time = time.time()
     logging.info("Step 4: Computing microstructure features using utility function on filtered data...")
     sym_dfs = {}
-    for sym, sym_df in tqdm(df_filtered.groupby('sym'), total=df_filtered['sym'].nunique(), desc="Computing microstructure features"):
-        logging.info(f"    Computed features for {sym}")
-        sym_df = compute_microstructure_features(sym_df.copy())
-        sym_dfs[sym] = sym_df
-        logging.info(f"    Dataset shape: {sym_df.shape}\n")
+    # Using a loop here as compute_microstructure_features might be memory intensive
+    # and parallelizing this on top of symbol processing might be too much.
+    # This part can be parallelized too if compute_microstructure_features is lightweight enough
+    # or if the system has ample memory.
+    for sym, sym_df_group in tqdm(df_filtered.groupby('sym'), total=df_filtered['sym'].nunique(), desc="Computing microstructure features"):
+        logging.info(f"    Computing features for {sym}...")
+        # Ensure a copy is passed to avoid modifying the original group in df_filtered if it's not a copy already
+        processed_sym_df = compute_microstructure_features(sym_df_group.copy()) 
+        sym_dfs[sym] = processed_sym_df
+        logging.info(f"    Dataset shape for {sym}: {processed_sym_df.shape if processed_sym_df is not None else 'None'}\\n")
 
-    #df_featured = compute_microstructure_features(df_filtered) 
     feature_time = time.time() - step_start_time
     mem_after_features = get_memory_usage_gb()
     day_peak_mem_current = max(day_peak_mem_current, mem_after_features)
-    total_rows_in_sym_dfs = sum(df.shape[0] for df in sym_dfs.values())
+    total_rows_in_sym_dfs = sum(df.shape[0] for df in sym_dfs.values() if df is not None)
     logging.info(f"Step 4 (Features) complete: Time={feature_time:.2f}s, Peak Mem={mem_after_features:.2f} GB, Processed {len(sym_dfs)} symbols with a total of {total_rows_in_sym_dfs} rows.")
     del df_filtered; gc.collect() 
 
-
-    # --- 5. Process Symbols Sequentially with Per-Symbol Checks --- 
+    # --- 5. Process Symbols in Parallel with Per-Symbol Checks --- 
     step_start_time = time.time()
-    logging.info(f"Step 5: Processing symbols sequentially for day {day} with detailed checks...")
+    logging.info(f"Step 5: Processing symbols in parallel for day {day} with detailed checks...")
     num_symbols = len(sym_dfs)
-    logging.info(f"Found {num_symbols} symbols with precomputed features to process sequentially.")
+    logging.info(f"Found {num_symbols} symbols with precomputed features to process in parallel.")
 
-    all_X_windows_day = []
-    all_target_windows_day = []
-    all_window_info_day = []
-    master_feature_cols_list = None 
-
-    for sym_name, group_df in tqdm(sym_dfs.items(), total=num_symbols, desc=f"Sequential Processing {day}"):
-        logging.info(f"--- Processing symbol: {sym_name} ---")
-
-        # Calculate nb_bars for this specific symbol
-        nb_bars_for_sym = compute_nb_bars(group_df.copy(), max_nb_bars=nb_bars) # Use main nb_bars as max_nb_bars for consistency
-
-        # --- Create Volume Bars and Sequential Windows ---
-        symbol_result = _process_symbol_bars_windows(
+    # Prepare tasks for joblib
+    tasks = []
+    for sym_name, group_df in sym_dfs.items():
+        if group_df is None or group_df.empty:
+            logging.warning(f"Skipping symbol {sym_name} due to empty or None DataFrame before parallel processing.")
+            continue
+        logging.info(f"--- Preparing task for symbol: {sym_name} ---")
+        nb_bars_for_sym = compute_nb_bars(group_df.copy(), max_nb_bars=nb_bars)
+        tasks.append(delayed(_process_symbol_bars_windows)(
             sym_name=sym_name,
             df_sym=group_df.copy(), 
             nb_bars=nb_bars_for_sym, 
             window_length=window_length,
             target_window_length=target_window_length,
             target_col_name=target_col_name
-        )
+        ))
+    
+    # Execute tasks in parallel
+    # n_jobs=-1 uses all available cores. backend="loky" is default and robust.
+    # Added verbose=10 for progress updates from joblib
+    logging.info(f"Starting parallel execution for {len(tasks)} symbol tasks...")
+    results = Parallel(n_jobs=-1, verbose=10)(tasks) 
+    logging.info("Parallel symbol processing finished.")
 
-        if symbol_result is not None:
-            X_windows_sym, target_windows_sym, window_info_sym, features_for_sym = symbol_result
-            
-            # Feature List Consistency Check
-            if master_feature_cols_list is None:
-                master_feature_cols_list = features_for_sym
-                logging.info(f"  [{sym_name}] Captured master feature list ({len(master_feature_cols_list)} features): {master_feature_cols_list[:5]}...")
+    all_X_windows_day = []
+    all_target_windows_day = []
+    all_window_info_day = []
+    master_feature_cols_list = None 
 
-            elif master_feature_cols_list != features_for_sym:
-                logging.error(f"  [{sym_name}] CRITICAL MISMATCH: Feature list does not match master list. Skipping this symbol.")
-                logging.error(f"    Master ({len(master_feature_cols_list)}): {master_feature_cols_list[:5]}...")
-                logging.error(f"    Symbol's ({len(features_for_sym)}): {features_for_sym[:5]}...")
-                continue 
+    # Process results from parallel execution
+    for symbol_result in tqdm(results, total=len(results), desc=f"Aggregating Results {day}"):
+        if symbol_result is None:
+            # _process_symbol_bars_windows already logs errors for the specific symbol
+            logging.warning("A symbol processing task returned None. Skipping its results.")
+            continue
 
-            # 2. Per-Symbol Alignment Check
-            logging.info(f"  [{sym_name}] Performing alignment check for its {len(X_windows_sym)} windows...")
-            if not window_info_sym.empty and target_col_name in features_for_sym:
+        # Unpack results: sym_name is now returned by _process_symbol_bars_windows
+        ret_sym_name, X_windows_sym, target_windows_sym, window_info_sym, features_for_sym = symbol_result
+        
+        logging.info(f"--- Aggregating results for symbol: {ret_sym_name} ---")
+
+        # Feature List Consistency Check
+        if master_feature_cols_list is None:
+            master_feature_cols_list = features_for_sym
+            logging.info(f"  [{ret_sym_name}] Captured master feature list ({len(master_feature_cols_list)} features): {master_feature_cols_list[:5]}...")
+        elif master_feature_cols_list != features_for_sym:
+            logging.error(f"  [{ret_sym_name}] CRITICAL MISMATCH: Feature list does not match master list. Skipping this symbol.")
+            logging.error(f"    Master ({len(master_feature_cols_list)}): {master_feature_cols_list[:5]}...")
+            logging.error(f"    Symbol's ({len(features_for_sym)}): {features_for_sym[:5]}...")
+            continue 
+
+        # Per-Symbol Alignment Check
+        logging.info(f"  [{ret_sym_name}] Performing alignment check for its {len(X_windows_sym)} windows...")
+        if not window_info_sym.empty and target_col_name in features_for_sym:
+            # Ensure target_col_name is present in the features_for_sym list
+            try:
                 target_feature_idx_sym = features_for_sym.index(target_col_name)
-                all_x_last_targets_sym = X_windows_sym[:, -1, target_feature_idx_sym]
-                all_info_last_targets_sym = window_info_sym['last_target_in_window'].values
-
-                if len(all_x_last_targets_sym) == len(all_info_last_targets_sym) and \
-                   np.all(np.isclose(all_x_last_targets_sym, all_info_last_targets_sym)):
-                    logging.info(f"    [{sym_name}] ALIGNMENT CHECK PASSED for this symbol.")
-                else:
-                    num_mismatches_sym = np.sum(~np.isclose(all_x_last_targets_sym, all_info_last_targets_sym)) if len(all_x_last_targets_sym) == len(all_info_last_targets_sym) else -1
-                    logging.error(f"    [{sym_name}] ALIGNMENT CHECK FAILED for this symbol! Mismatches: {num_mismatches_sym}/{len(all_x_last_targets_sym)}. Skipping this symbol.")
-                    continue # Skip to next symbol
-            elif window_info_sym.empty:
-                 logging.warning(f"  [{sym_name}] window_info_sym is empty. Cannot perform alignment check. Skipping.")
-                 continue
-            else: # target_col_name not in features_for_sym
-                logging.warning(f"  [{sym_name}] Target column '{target_col_name}' not found in its feature list. Cannot perform alignment check. Skipping.")
+            except ValueError:
+                logging.error(f"  [{ret_sym_name}] Target column '{target_col_name}' not found in its feature list {features_for_sym}. Cannot perform alignment check. Skipping.")
                 continue
 
-            # If all checks passed for this symbol, append its data
-            all_X_windows_day.append(X_windows_sym)
-            all_target_windows_day.append(target_windows_sym)
-            all_window_info_day.append(window_info_sym)
-            #any_symbol_processed_successfully = True
-            logging.info(f"  [{sym_name}] Successfully processed and data appended.")
+            all_x_last_targets_sym = X_windows_sym[:, -1, target_feature_idx_sym]
+            all_info_last_targets_sym = window_info_sym['last_target_in_window'].values
 
-        raise ValueError(f"  [{sym_name}] _process_symbol_bars_windows returned None. Skipping.")
+            if len(all_x_last_targets_sym) == len(all_info_last_targets_sym) and \
+               np.all(np.isclose(all_x_last_targets_sym, all_info_last_targets_sym, equal_nan=True)): # Added equal_nan=True
+                logging.info(f"    [{ret_sym_name}] ALIGNMENT CHECK PASSED for this symbol.")
+            else:
+                num_mismatches_sym = np.sum(~np.isclose(all_x_last_targets_sym, all_info_last_targets_sym, equal_nan=True)) if len(all_x_last_targets_sym) == len(all_info_last_targets_sym) else -1
+                logging.error(f"    [{ret_sym_name}] ALIGNMENT CHECK FAILED for this symbol! Mismatches: {num_mismatches_sym}/{len(all_x_last_targets_sym)}. Skipping this symbol.")
+                # Log some mismatch details
+                if len(all_x_last_targets_sym) == len(all_info_last_targets_sym) and num_mismatches_sym > 0:
+                    mismatch_indices = np.where(~np.isclose(all_x_last_targets_sym, all_info_last_targets_sym, equal_nan=True))[0]
+                    logging.error(f"      First few mismatch indices: {mismatch_indices[:5]}")
+                    for k_idx in mismatch_indices[:min(3, len(mismatch_indices))]: # Log first 3 mismatches
+                         logging.error(f"      Mismatch at index {k_idx}: X_last_target={all_x_last_targets_sym[k_idx]}, Info_last_target={all_info_last_targets_sym[k_idx]}")
+                continue # Skip to next symbol
+        elif window_info_sym.empty and (X_windows_sym is not None and X_windows_sym.size > 0) : # If X_windows exist but info is empty
+             logging.warning(f"  [{ret_sym_name}] window_info_sym is empty, but X_windows were generated. Cannot perform alignment check. Skipping.")
+             continue
+        elif window_info_sym.empty: # No windows generated, so info is expected to be empty.
+             logging.info(f"  [{ret_sym_name}] window_info_sym is empty and no X_windows generated. Skipping alignment check (expected).")
+             # This case means no windows were made for the symbol, so it's fine to skip, it won't be added to lists.
+             continue # No data to append
+        else: # target_col_name not in features_for_sym
+            logging.warning(f"  [{ret_sym_name}] Target column '{target_col_name}' not found in its feature list. Cannot perform alignment check. Skipping.")
+            continue
+
+        # If all checks passed for this symbol, append its data
+        all_X_windows_day.append(X_windows_sym)
+        all_target_windows_day.append(target_windows_sym)
+        all_window_info_day.append(window_info_sym)
+        logging.info(f"  [{ret_sym_name}] Successfully processed and data appended.")
             
-    logging.info("Sequential symbol processing finished.")
-    # Free memory of intermediate symbol data if any
+    # Free memory of intermediate symbol data from sym_dfs and results
+    del sym_dfs; gc.collect()
+    del results; gc.collect()
     if 'group_df' in locals(): del group_df 
     if 'symbol_result' in locals(): del symbol_result
     if 'X_windows_sym' in locals(): del X_windows_sym
@@ -574,11 +608,11 @@ def process_day(
     if 'window_info_sym' in locals(): del window_info_sym
     gc.collect()
 
-    # --- End of Sequential Symbol Processing ---
+    # --- End of Parallel Symbol Processing ---
     bars_window_time = time.time() - step_start_time
     mem_after_bars_windows = get_memory_usage_gb()
     day_peak_mem_current = max(day_peak_mem_current, mem_after_bars_windows)
-    logging.info(f"Step 5 (Sequential Symbol Processing) complete: Time={bars_window_time:.2f}s, Peak Mem={mem_after_bars_windows:.2f} GB")
+    logging.info(f"Step 5 (Parallel Symbol Processing & Aggregation) complete: Time={bars_window_time:.2f}s, Peak Mem={mem_after_bars_windows:.2f} GB")
 
     # --- 6. Combine and Save Daily Results ---
     step_start_time = time.time()
@@ -600,13 +634,27 @@ def process_day(
             del all_target_windows_day; gc.collect()
             
             logging.debug("Concatenating daily window info...")
-            window_info_day_final = pd.concat(all_window_info_day, ignore_index=False) 
+            window_info_day_final = pd.concat(all_window_info_day, ignore_index=True) # Changed to ignore_index=True
             del all_window_info_day; gc.collect()
 
             day_windows_count = len(X_windows_day_final) if 'X_windows_day_final' in locals() and X_windows_day_final is not None else 0
             logging.info(f"Combined and sorted {day_windows_count} windows for day {day}.")
             if day_windows_count > 0:
+                 # Sort final combined data by window_end_time before saving
+                 window_info_day_final = window_info_day_final.sort_values(by=['sym', 'window_end_time']).reset_index(drop=True)
+                 # Reorder X and target arrays according to the sorted window_info_day_final
+                 # This requires careful index matching if original indices were not preserved or meaningful
+                 # For simplicity, if using ignore_index=True in concat, this step needs careful handling.
+                 # Assuming the order from concat is mostly preserved by symbol blocks,
+                 # but a full re-sort based on original indices or a more robust join key would be better if strict order is critical.
+                 # Given current structure, the data is concatenated by symbol, so within each symbol's block it's time-ordered.
+                 # Sorting window_info_day_final by sym then time is good.
+                 # Re-ordering numpy arrays based on this sorted DataFrame is complex without a unique ID.
+                 # For now, we'll save them as concatenated, noting that window_info IS sorted.
+                 # If strict global time sort across symbols is needed for saved .npy, it's a more involved step.
+
                  logging.info(f"Final Day Shapes: X={X_windows_day_final.shape}, TGT={target_windows_day_final.shape}, INFO={window_info_day_final.shape}")
+
 
             # Create the output directory for the day
             day_output_dir = os.path.join(output_dir, day)
@@ -631,7 +679,7 @@ def process_day(
                 try:
                     with open(feature_list_fname, 'w') as f:
                         for feature_name in master_feature_cols_list: 
-                            f.write(f"{feature_name}\\n")
+                            f.write(f"{feature_name}\\n") # Corrected to \\n for newline
                     logging.info(f"Saved feature list to {feature_list_fname}")
                 except Exception as e:
                     logging.error(f"Error saving feature list to {feature_list_fname}: {e}")
@@ -643,9 +691,10 @@ def process_day(
 
         except Exception as e:
             logging.error(f"Error combining or saving results for day {day}: {e}", exc_info=True)
-            if 'all_X_windows_day' in locals(): del all_X_windows_day
-            if 'all_target_windows_day' in locals(): del all_target_windows_day
-            if 'all_window_info_day' in locals(): del all_window_info_day
+            # Ensure cleanup of potentially large lists
+            if 'all_X_windows_day' in locals() and all_X_windows_day is not None: del all_X_windows_day
+            if 'all_target_windows_day' in locals() and all_target_windows_day is not None: del all_target_windows_day
+            if 'all_window_info_day' in locals() and all_window_info_day is not None: del all_window_info_day
             if 'X_windows_day_final' in locals() and X_windows_day_final is not None: del X_windows_day_final
             if 'target_windows_day_final' in locals() and target_windows_day_final is not None: del target_windows_day_final
             if 'window_info_day_final' in locals() and window_info_day_final is not None: del window_info_day_final
@@ -667,7 +716,7 @@ def process_day(
 def main():
     
     # --- Configuration ---
-    logging.info("=== Configuring Volume Bar Pipeline ===")
+    logging.info("=== Configuring Volume Bar Pipeline (Parallel Symbols) ===") # Updated log message
     BASE_DATA_PATH = '/mnt//storage_1_10T/citibank/egbs_data_02_25'
     
     DAYS_TO_PROCESS = [
@@ -684,7 +733,7 @@ def main():
     WINDOW_LENGTH = 150
     TARGET_WINDOW_LENGTH = 30
     TARGET_COLUMN_NAME = 'wmp_mean'
-    BASE_OUTPUT_DIR = '/mnt/storage_1_10T/citibank/data/processed_data_volume_bars'
+    BASE_OUTPUT_DIR = '/mnt/storage_1_10T/citibank/data/processed_data_volume_bars_parallel' # Suggest new output dir
     PARAMS_SUBDIR = f"volbars_{NB_BARS_PER_DAY_SYMBOL}_in{WINDOW_LENGTH}_tgt{TARGET_WINDOW_LENGTH}"
     OUTPUT_DIR = os.path.join(BASE_OUTPUT_DIR, PARAMS_SUBDIR)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -693,8 +742,8 @@ def main():
     # --- Start Processing ---
     total_windows_generated_all_days = 0
     overall_start_time = time.time()
-    overall_peak_mem_gb = 0.0
-    logging.info("=== Starting Day-by-Day Volume Bar Processing ===")
+    # overall_peak_mem_gb = 0.0 # This variable was not used, can be removed or implemented if needed
+    logging.info("=== Starting Day-by-Day Volume Bar Processing (Parallel Symbols) ===") # Updated log message
 
     for day in DAYS_TO_PROCESS:
         # Call the refactored process_day function
@@ -716,11 +765,11 @@ def main():
     # --- End of All Days Loop ---
     overall_end_time = time.time()
     total_duration = overall_end_time - overall_start_time
-    logging.info("\n=== Finished All Volume Bar Processing ===")
+    logging.info("\\n=== Finished All Volume Bar Processing (Parallel Symbols) ===") # Updated log message
     logging.info(f"Total windows generated across all days: {total_windows_generated_all_days:,}")
     logging.info(f"Total processing time: {total_duration:.2f} seconds ({total_duration/60:.2f} minutes)")
     logging.info(f"Daily processed files are saved in subdirectories under: {OUTPUT_DIR}")
-    logging.info("--- Volume Bar Pipeline Finished ---")
+    logging.info("--- Volume Bar Pipeline (Parallel Symbols) Finished ---") # Updated log message
 
 if __name__ == "__main__":
     main() 

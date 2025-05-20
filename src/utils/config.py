@@ -6,11 +6,11 @@ PROCESSED_DATA_DIR_VOLUME = '/mnt/storage_1_10T/citibank/data/processed_data_vol
 
 # Specific days to use for training and testing
 # First 7 days for train, last 3 for test 
-TRAIN_DAYS = ['20250212', '20250213', '20250214', '20250217', '20250218', '20250219', '20250220']
-TEST_DAYS = ['20250221', '20250224', '20250225']
+# TRAIN_DAYS = ['20250212', '20250213', '20250214', '20250217', '20250218', '20250219', '20250220']
+# TEST_DAYS = ['20250221', '20250224', '20250225']
 
-# TRAIN_DAYS = ['20250212', '20250213']
-# TEST_DAYS = ['20250214']
+TRAIN_DAYS = ['20250212', '20250213']
+TEST_DAYS = ['20250214']
 
 # Parameters defining the data structure (used in subfolder names)
 # -- Time Bars --
