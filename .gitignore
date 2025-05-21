@@ -1,0 +1,10 @@
+# Project folders
+data/
+processed_data/
+Archives/
+results/
+
+**/__pycache__/
+
+# OS specific
+.DS_Store
