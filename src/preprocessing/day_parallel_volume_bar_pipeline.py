@@ -560,7 +560,7 @@ def main():
     ]
     NB_BARS_PER_DAY_SYMBOL = 10000
     WINDOW_LENGTH = 150
-    TARGET_WINDOW_LENGTH = 30
+    TARGET_WINDOW_LENGTH = 10
     TARGET_COLUMN_NAME = 'wmp_mean' # Example target column
     BASE_OUTPUT_DIR = '/mnt/storage_1_10T/citibank/data/processed_data_volume_bars_day_parallel' # New output dir
     PARAMS_SUBDIR = f"volbars_{NB_BARS_PER_DAY_SYMBOL}_in{WINDOW_LENGTH}_tgt{TARGET_WINDOW_LENGTH}"
@@ -590,7 +590,7 @@ def main():
     # Consider lower n_jobs if memory per process is very high.
     # joblib's default backend is 'loky', which is process-based.
     logging.info(f"Starting parallel execution for {len(tasks)} days...")
-    daily_windows_counts = Parallel(n_jobs=-1, verbose=10)(tasks)
+    daily_windows_counts = Parallel(n_jobs=4, verbose=10)(tasks)
     
     total_windows_generated_all_days = sum(filter(None, daily_windows_counts)) # Summing results, filtering Nones if any day failed
 
