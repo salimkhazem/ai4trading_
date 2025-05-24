@@ -10,7 +10,12 @@ from typing import List, Tuple, Optional
 import gc
 from pathlib import Path
 import warnings
+<<<<<<< HEAD
 from joblib import Parallel, delayed 
+=======
+from joblib import Parallel, delayed # Added for parallel processing
+
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
 # --- Add project root to sys.path ---
 current_file_path = Path(__file__).resolve()
 project_root_path = current_file_path.parent.parent
@@ -29,6 +34,10 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
 def compute_nb_bars(
     symbol_data: pd.DataFrame, 
     min_avg_snapshots_per_bar: int = 150,
@@ -426,7 +435,11 @@ def process_day(
     target_window_length: int,
     target_col_name: str,
     output_dir: str,
+<<<<<<< HEAD
     symbols_to_keep: List[str]  # Changed from symbols_to_exclude
+=======
+    symbols_to_exclude: List[str] 
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
 ) -> int:
     """Process a single day: load, feature compute, bar creation, windowing (in parallel), combine, save."""
     logging.info(f"--- Processing Day: {day} ---")
@@ -461,6 +474,7 @@ def process_day(
 
     # --- 3. Filter Symbols ---
     step_start_time = time.time()
+<<<<<<< HEAD
     logging.info(f"Step 3: Filtering symbols. Keeping only symbols in the provided list: {symbols_to_keep[:5]}... (Total: {len(symbols_to_keep)})")
         
     initial_syms_count = df_clean['sym'].nunique()
@@ -471,11 +485,19 @@ def process_day(
     final_syms_count = df_filtered['sym'].nunique()
     syms_dropped_total = initial_syms_count - final_syms_count
     syms_kept_list = df_filtered['sym'].unique().tolist()
+=======
+    logging.info(f"Step 3: Filtering symbols (excluding {symbols_to_exclude})...")
+        
+    initial_syms = df_clean['sym'].nunique()
+    df_filtered = df_clean[~df_clean['sym'].isin(symbols_to_exclude)].copy()
+    syms_dropped = initial_syms - df_filtered['sym'].nunique()
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
 
     filter_time = time.time() - step_start_time
     mem_after_filter = get_memory_usage_gb()
     day_peak_mem_current = max(day_peak_mem_current, mem_after_filter)
     logging.info(f"Step 3 (Filter Sym) complete: Time={filter_time:.2f}s, Peak Mem={mem_after_filter:.2f} GB")
+<<<<<<< HEAD
     logging.info(f"Initial symbols: {initial_syms_count}. Symbols to keep specified: {len(symbols_to_keep)}. Actual symbols kept: {final_syms_count}. Total symbols dropped/not in keep list: {syms_dropped_total}.")
     logging.info(f"Kept symbols list: {syms_kept_list if syms_kept_list else 'None'}")
     
@@ -485,12 +507,27 @@ def process_day(
         logging.warning(f"No symbols remaining after filtering for day {day}. Skipping further processing for this day.")
         return 0
 
+=======
+    logging.info(f"Dropped {syms_dropped} symbols. Shape after symbol filter: {df_filtered.shape}")
+    del df_clean; gc.collect()
+
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
     # --- 4. Compute Microstructure Features ---
     step_start_time = time.time()
     logging.info("Step 4: Computing microstructure features using utility function on filtered data...")
     sym_dfs = {}
+<<<<<<< HEAD
     for sym, sym_df_group in tqdm(df_filtered.groupby('sym'), total=df_filtered['sym'].nunique(), desc="Computing microstructure features"):
         logging.info(f"    Computing features for {sym}...")
+=======
+    # Using a loop here as compute_microstructure_features might be memory intensive
+    # and parallelizing this on top of symbol processing might be too much.
+    # This part can be parallelized too if compute_microstructure_features is lightweight enough
+    # or if the system has ample memory.
+    for sym, sym_df_group in tqdm(df_filtered.groupby('sym'), total=df_filtered['sym'].nunique(), desc="Computing microstructure features"):
+        logging.info(f"    Computing features for {sym}...")
+        # Ensure a copy is passed to avoid modifying the original group in df_filtered if it's not a copy already
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
         processed_sym_df = compute_microstructure_features(sym_df_group.copy()) 
         sym_dfs[sym] = processed_sym_df
         logging.info(f"    Dataset shape for {sym}: {processed_sym_df.shape if processed_sym_df is not None else 'None'}\\n")
@@ -526,6 +563,11 @@ def process_day(
         ))
     
     # Execute tasks in parallel
+<<<<<<< HEAD
+=======
+    # n_jobs=-1 uses all available cores. backend="loky" is default and robust.
+    # Added verbose=10 for progress updates from joblib
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
     logging.info(f"Starting parallel execution for {len(tasks)} symbol tasks...")
     results = Parallel(n_jobs=-1, verbose=10)(tasks) 
     logging.info("Parallel symbol processing finished.")
@@ -644,6 +686,20 @@ def process_day(
             if day_windows_count > 0:
                  # Sort final combined data by window_end_time before saving
                  window_info_day_final = window_info_day_final.sort_values(by=['sym', 'window_end_time']).reset_index(drop=True)
+<<<<<<< HEAD
+=======
+                 # Reorder X and target arrays according to the sorted window_info_day_final
+                 # This requires careful index matching if original indices were not preserved or meaningful
+                 # For simplicity, if using ignore_index=True in concat, this step needs careful handling.
+                 # Assuming the order from concat is mostly preserved by symbol blocks,
+                 # but a full re-sort based on original indices or a more robust join key would be better if strict order is critical.
+                 # Given current structure, the data is concatenated by symbol, so within each symbol's block it's time-ordered.
+                 # Sorting window_info_day_final by sym then time is good.
+                 # Re-ordering numpy arrays based on this sorted DataFrame is complex without a unique ID.
+                 # For now, we'll save them as concatenated, noting that window_info IS sorted.
+                 # If strict global time sort across symbols is needed for saved .npy, it's a more involved step.
+
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
                  logging.info(f"Final Day Shapes: X={X_windows_day_final.shape}, TGT={target_windows_day_final.shape}, INFO={window_info_day_final.shape}")
 
 
@@ -719,15 +775,23 @@ def main():
     #     '20250212'
     # ]
 
+<<<<<<< HEAD
     SYMBOLS_TO_KEEP = [
         'FBONH5', 'FBTPH5', 'FBTSH5', 'FGBLH5',
         'FGBMH5', 'FGBSH5', 'FGBXH5', 'FOATH5'
     ]
+=======
+    SYMBOLS_TO_EXCLUDE = ['FGBLM5', 'CONFH5']
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
     NB_BARS_PER_DAY_SYMBOL = 10000
     WINDOW_LENGTH = 150
     TARGET_WINDOW_LENGTH = 30
     TARGET_COLUMN_NAME = 'wmp_mean'
+<<<<<<< HEAD
     BASE_OUTPUT_DIR = '/mnt/storage_1_10T/citibank/data/processed_data_volume_bars_parallel'
+=======
+    BASE_OUTPUT_DIR = '/mnt/storage_1_10T/citibank/data/processed_data_volume_bars_parallel' # Suggest new output dir
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
     PARAMS_SUBDIR = f"volbars_{NB_BARS_PER_DAY_SYMBOL}_in{WINDOW_LENGTH}_tgt{TARGET_WINDOW_LENGTH}"
     OUTPUT_DIR = os.path.join(BASE_OUTPUT_DIR, PARAMS_SUBDIR)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -749,7 +813,11 @@ def main():
             target_window_length=TARGET_WINDOW_LENGTH,
             target_col_name=TARGET_COLUMN_NAME,
             output_dir=OUTPUT_DIR,
+<<<<<<< HEAD
             symbols_to_keep=SYMBOLS_TO_KEEP  # Changed from symbols_to_exclude
+=======
+            symbols_to_exclude=SYMBOLS_TO_EXCLUDE
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
         )
         total_windows_generated_all_days += daily_windows
         # Memory tracking update (optional, if process_day doesn't capture peak correctly)

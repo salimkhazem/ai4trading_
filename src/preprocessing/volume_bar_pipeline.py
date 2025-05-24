@@ -94,7 +94,11 @@ def create_volume_bars_with_lob_features(
         logging.error(f"Missing required columns for bar creation: Needs {required_cols}. Found {df_symbol.columns.tolist()}")
         return None
     
+<<<<<<< HEAD
     # Ensure data is sorted by time 
+=======
+    # Ensure data is sorted by time (should be done before calling, but double-check)
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
     if not df_symbol[time_col_name].is_monotonic_increasing:
          logging.warning("Input data not sorted by time. Sorting now...")
          df_symbol = df_symbol.sort_values(time_col_name).reset_index(drop=True)
@@ -154,7 +158,10 @@ def create_volume_bars_with_lob_features(
         if col not in cols_to_exclude_from_generic_aggregation
         and pd.api.types.is_numeric_dtype(data_full_bars[col]) 
     ]
+<<<<<<< HEAD
 
+=======
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
     logging.debug(f"Identified {len(features_to_aggregate)} features for generic aggregation. First 5: {features_to_aggregate[:5] if features_to_aggregate else 'None'}")
 
     # Aggregation function
@@ -176,7 +183,12 @@ def create_volume_bars_with_lob_features(
         for col in features_to_aggregate:
             # Catch and log RuntimeWarnings specifically for this column's aggregations
             with warnings.catch_warnings(record=True) as caught_warnings:
+<<<<<<< HEAD
                 warnings.simplefilter("always", RuntimeWarning) 
+=======
+                warnings.simplefilter("always", RuntimeWarning) # Ensure RuntimeWarnings are caught
+
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
                 try:
                     mean_val = bar_group[col].mean()
                     sum_val = bar_group[col].sum()
@@ -193,7 +205,18 @@ def create_volume_bars_with_lob_features(
                     results[f"{col}_median"] = median_val
 
                 except Exception as e:
+<<<<<<< HEAD
                     raise RuntimeError(f"Error during generic aggregation for column '{col}': {e}")
+=======
+                    logging.error(f"Error during generic aggregation for column '{col}': {e}", exc_info=True)
+                    # Assign NaNs or 0s if an unexpected error occurs during aggregation
+                    results[f"{col}_mean"] = np.nan
+                    results[f"{col}_sum"] = np.nan
+                    results[f"{col}_min"] = np.nan
+                    results[f"{col}_max"] = np.nan
+                    results[f"{col}_std"] = np.nan
+                    results[f"{col}_median"] = np.nan
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
 
 
                 if caught_warnings:
@@ -420,7 +443,11 @@ def process_day(
     target_window_length: int,
     target_col_name: str,
     output_dir: str,
+<<<<<<< HEAD
     symbols_to_keep: List[str]
+=======
+    symbols_to_exclude: List[str] 
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
 ) -> int:
     """Process a single day: load, feature compute, bar creation, windowing, combine, save."""
     logging.info(f"--- Processing Day: {day} ---")
@@ -455,6 +482,7 @@ def process_day(
 
     # --- 3. Filter Symbols ---
     step_start_time = time.time()
+<<<<<<< HEAD
     logging.info(f"Step 3: Filtering symbols. Keeping only symbols in the provided list: {symbols_to_keep[:5]}... (Total: {len(symbols_to_keep)})")
         
     initial_syms_count = df_clean['sym'].nunique()
@@ -465,11 +493,19 @@ def process_day(
     final_syms_count = df_filtered['sym'].nunique()
     syms_dropped_total = initial_syms_count - final_syms_count
     syms_kept_list = df_filtered['sym'].unique().tolist()
+=======
+    logging.info(f"Step 3: Filtering symbols (excluding {symbols_to_exclude})...")
+        
+    initial_syms = df_clean['sym'].nunique()
+    df_filtered = df_clean[~df_clean['sym'].isin(symbols_to_exclude)].copy()
+    syms_dropped = initial_syms - df_filtered['sym'].nunique()
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
 
     filter_time = time.time() - step_start_time
     mem_after_filter = get_memory_usage_gb()
     day_peak_mem_current = max(day_peak_mem_current, mem_after_filter)
     logging.info(f"Step 3 (Filter Sym) complete: Time={filter_time:.2f}s, Peak Mem={mem_after_filter:.2f} GB")
+<<<<<<< HEAD
     logging.info(f"Initial symbols: {initial_syms_count}. Symbols to keep specified: {len(symbols_to_keep)}. Actual symbols kept: {final_syms_count}. Total symbols dropped/not in keep list: {syms_dropped_total}.")
     logging.info(f"Kept symbols list: {syms_kept_list if syms_kept_list else 'None'}")
     
@@ -479,6 +515,11 @@ def process_day(
         logging.warning(f"No symbols remaining after filtering for day {day}. Skipping further processing for this day.")
         return 0
 
+=======
+    logging.info(f"Dropped {syms_dropped} symbols. Shape after symbol filter: {df_filtered.shape}")
+    del df_clean; gc.collect()
+
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
     # --- 4. Compute Microstructure Features ---
     step_start_time = time.time()
     logging.info("Step 4: Computing microstructure features using utility function on filtered data...")
@@ -683,10 +724,14 @@ def main():
     #     '20250212'
     # ]
 
+<<<<<<< HEAD
     SYMBOLS_TO_KEEP = [
         'FBONH5', 'FBTPH5', 'FBTSH5', 'FGBLH5',
         'FGBMH5', 'FGBSH5', 'FGBXH5', 'FOATH5' 
     ]
+=======
+    SYMBOLS_TO_EXCLUDE = ['FGBLM5', 'CONFH5']
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
     NB_BARS_PER_DAY_SYMBOL = 10000
     WINDOW_LENGTH = 150
     TARGET_WINDOW_LENGTH = 30
@@ -713,9 +758,18 @@ def main():
             target_window_length=TARGET_WINDOW_LENGTH,
             target_col_name=TARGET_COLUMN_NAME,
             output_dir=OUTPUT_DIR,
+<<<<<<< HEAD
             symbols_to_keep=SYMBOLS_TO_KEEP
         )
         total_windows_generated_all_days += daily_windows
+=======
+            symbols_to_exclude=SYMBOLS_TO_EXCLUDE
+        )
+        total_windows_generated_all_days += daily_windows
+        # Memory tracking update (optional, if process_day doesn't capture peak correctly)
+        # current_mem = get_memory_usage_gb()
+        # overall_peak_mem_gb = max(overall_peak_mem_gb, current_mem)
+>>>>>>> 0a8d9d017d676dc7e5decb0b3f9d7f288b281017
 
     # --- End of All Days Loop ---
     overall_end_time = time.time()

@@ -19,6 +19,7 @@ RESAMPLE_FREQ = '1s'
 NB_BARS = 10000 # Default number of bars per symbol per day
 # -- Common --
 WINDOW_LENGTH = 150 # Input window length 
+
 TARGET_WINDOW_LENGTH = 30 # Target window length 
 
 
