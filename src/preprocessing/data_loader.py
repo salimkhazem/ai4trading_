@@ -1,5 +1,5 @@
 """
-Data loading and preprocessing orchestration for AI4Trading system.
+Data loading and preprocessing orchestration #TODO: add multiprocessing and accelerate the pipeline
 
 This module provides the main DataProcessor class that orchestrates the complete
 preprocessing pipeline from raw data to training-ready windows.
