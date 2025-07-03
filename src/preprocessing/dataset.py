@@ -1,5 +1,5 @@
 """
-Dataset processing module for AI4Trading system.
+Dataset processing module : TODO: add multiprocessing and accelerate the pipeline
 
 This module provides classes for constructing different types of bars (time/volume)
 and generating sequential windows for machine learning training.
